@@ -298,24 +298,20 @@ if __name__ == "__main__":
         user = sys.argv[1]
         # 登录密码
         passwd = sys.argv[2]
-        step = step
+    
     except IndexError as e:
         print("参数有误: " + str(e))
         exit(1)
 
     user_list = user.split('#')
     passwd_list = passwd.split('#')
-    setp_array = step.split('-')
+
 
     if len(user_list) == len(passwd_list):
         to_push.push_msg = ''
         for user, passwd in zip(user_list, passwd_list):
-            if len(setp_array) == 2:
-                step = str(random.randint(int(setp_array[0]), int(setp_array[1])))
-                print(f"已设置为随机步数（{setp_array[0]}-{setp_array[1]}）")
-            elif str(step) == '0':
-                step = ''
-            to_push.push_msg += main(user, passwd, step) + '\n'
+            
+            to_push.push_msg += main(user, passwd) + '\n'
 
         push = {
             'pp': to_push.to_push_pushplus,
