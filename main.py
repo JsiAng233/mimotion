@@ -285,7 +285,7 @@ class ToPush:
         """
         print('不推送')
 
-if __name__ == "__main__"（min_1, max_1):
+if __name__ == "__main__":
    # Push Mode
     # print(sys.argv)
     try:
@@ -298,7 +298,7 @@ if __name__ == "__main__"（min_1, max_1):
         user = sys.argv[1]
         # 登录密码
         passwd = sys.argv[2]
-        step = str(random.randint(min_1, max_1))
+        step = result
     except IndexError as e:
         print("参数有误: " + str(e))
         exit(1)
