@@ -235,5 +235,97 @@ def get_app_token(login_token):
     # print(app_token)
     return app_token
 
+
+def push_pushplus(token, content=""):
+    """
+    推送消息到pushplus
+    """
+    if token == '':
+        print("[注意] 未提供token，不进行pushplus推送！")
+    else:
+        server_url = "http://www.pushplus.plus/send"
+        params = {
+            "token": token,
+            "title": '小米运动 步数修改',
+            "content": content
+        }
+
+        response = requests.get(server_url, params=params)
+        json_data = response.json()
+
+        if json_data['code'] == 200:
+            print(f"[{now}] 推送成功。")
+        else:
+            print(f"[{now}] 推送失败：{json_data['code']}({json_data['message']})")
+
+
+class ToPush:
+    """
+    推送接口类
+    处理pkey并转发推送消息到推送函数
+    """
+    push_msg: str
+
+    def __init__(self, _pkey):
+        self.pkey = _pkey
+
+    def to_push_pushplus(self):
+        """
+        接口
+        """
+        if self.pkey == '':
+            print('pushplus token错误')
+        else:
+            push_pushplus(self.pkey, self.push_msg)
+
+    @staticmethod
+    def no_push():
+        """
+        不推送
+        """
+        print('不推送')
+
 if __name__ == "__main__":
+   # Push Mode
+    # print(sys.argv)
+    try:
+        Pm = sys.argv[5]
+        pkey = sys.argv[6]
+
+        to_push = ToPush(pkey)
+
+        # 用户名（格式为 13800138000）
+        user = sys.argv[1]
+        # 登录密码
+        passwd = sys.argv[2]
+    except IndexError as e:
+        print("参数有误: " + str(e))
+        exit(1)
+
+    user_list = user.split('#')
+    passwd_list = passwd.split('#')
+    setp_array = step.split('-')
+
+    if len(user_list) == len(passwd_list):
+        to_push.push_msg = ''
+        for user, passwd in zip(user_list, passwd_list):
+            if len(setp_array) == 2:
+                step = str(random.randint(int(setp_array[0]), int(setp_array[1])))
+                print(f"已设置为随机步数（{setp_array[0]}-{setp_array[1]}）")
+            elif str(step) == '0':
+                step = ''
+            to_push.push_msg += main(user, passwd, step) + '\n'
+
+        push = {
+            'pp': to_push.to_push_pushplus,
+            'off': to_push.no_push
+        }
+        try:
+            push[Pm]()
+        except KeyError:
+            print('推送选项有误！')
+            exit(0)
+    else:
+        print('用户名和密码数量不对')  
+    
     getBeijinTime()
