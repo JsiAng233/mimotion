@@ -298,7 +298,7 @@ if __name__ == "__main__":
         user = sys.argv[1]
         # 登录密码
         passwd = sys.argv[2]
-        step = result
+        step = step
     except IndexError as e:
         print("参数有误: " + str(e))
         exit(1)
