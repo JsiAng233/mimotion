@@ -285,7 +285,7 @@ class ToPush:
         """
         print('不推送')
 
-if __name__ == "__main__":
+if __name__ == "__main__"（min_1, max_1):
    # Push Mode
     # print(sys.argv)
     try:
