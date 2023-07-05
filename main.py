@@ -214,13 +214,7 @@ def main(_user, _passwd, min_1, max_1):
     response = requests.post(url, data=data, headers=head).json()
     # print(response)
     result = f"[{now}]\n账号：{user[:3]}****{user[7:]}\n修改步数（{step}）[" + response['message'] + "]\n"
-    print(result)
-     if a:
-        push('【小米运动步数修改】', result)
-        push_wx(result)
-        run(result)
-    else:
-        print("此次修改结果不推送")
+    print(result)    
     return result
 
 
@@ -240,25 +234,6 @@ def get_app_token(login_token):
     # print("app_token获取成功！")
     # print(app_token)
     return app_token
-
-
-# 推送server
-def push_wx(content=""):
-    if sckey == 'NO':
-        return
-    else:
-        server_url = f"http://www.pushplus.plus/send"
-        params = {
-            "token":"{06e4ece6d11e4e01b33638ec14729786},
-            "title":'【小米运动步数修改】',
-            "content":content
-            "topic":"test"
-            
-        }
-
-        response = requests.get(server_url, params=params).text
-        print(response)
-
 
 if __name__ == "__main__":
     getBeijinTime()
