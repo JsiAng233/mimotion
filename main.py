@@ -27,6 +27,61 @@ def get_int_value_default(_config: dict, _key, default):
     return int(_config.get(_key))
 
 
+# 最近一次执行结果的状态文件，随仓库一起提交，用于“检查模式”判断当天是否需要补救
+STEP_STATE_FILE = "step_state.json"
+
+
+def get_target_step():
+    return get_int_value_default(config, 'TARGET_STEP', 19000)
+
+
+def load_step_state():
+    try:
+        with open(STEP_STATE_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return dict()
+
+
+def save_step_state(state, results=None):
+    today = time_bj.strftime("%F")
+    if results is not None:
+        accounts = state.get('accounts') if state.get('date') == today else {}
+        state['date'] = today
+        state['target'] = get_target_step()
+        for result in results:
+            accounts[result['user']] = {
+                'step': result.get('step'),
+                'success': result.get('success'),
+                'at': format_now()
+            }
+        state['accounts'] = accounts
+    state['checked_at'] = format_now()
+    with open(STEP_STATE_FILE, 'w', encoding='utf-8') as f:
+        json.dump(state, f, ensure_ascii=False, indent=1)
+
+
+def is_today_reached(state, user_list):
+    """当天所有账号都已成功写入，且写入值不低于目标的容差下限"""
+    today = time_bj.strftime("%F")
+    if state.get('date') != today:
+        return False
+    accounts = state.get('accounts') or {}
+    reach_ratio = float(config.get('STEP_REACHED_RATIO', 0.95))
+    threshold = int(get_target_step() * reach_ratio)
+    for user in user_list:
+        info = accounts.get(user)
+        if not info or info.get('success') is not True:
+            return False
+        step = info.get('step')
+        try:
+            if step is None or int(step) < threshold:
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
 # 获取当前时间对应的最大和最小步数
 def get_min_max_by_time(hour=None, minute=None):
     # 目标步数模式：不按当天时间线性缩放，任意时刻触发写入的步数都落在 TARGET_STEP 附近，
@@ -105,6 +160,7 @@ class MiMotionRunner:
         password = str(_passwd)
         self.invalid = False
         self.log_str = ""
+        self.last_step = None
         if user == '' or password == '':
             self.error = "用户名或密码填写有误！"
             self.invalid = True
@@ -198,6 +254,7 @@ class MiMotionRunner:
             return "登陆失败！", False
 
         step = str(random.randint(min_step, max_step))
+        self.last_step = step
         self.log_str += f"已设置为随机步数范围({min_step}~{max_step}) 随机值:{step}\n"
         
         user_token_info = user_tokens.get(self.user, {})
@@ -224,7 +281,7 @@ def run_single_account(total, idx, user_mi, passwd_mi):
         log_str += runner.log_str
         log_str += f'{exec_msg}\n'
         exec_result = {"user": user_mi, "success": success,
-                       "msg": exec_msg}
+                       "msg": exec_msg, "step": getattr(runner, "last_step", None)}
     except Exception:
         log_str += f"执行异常:{traceback.format_exc()}\n"
         log_str += traceback.format_exc()
@@ -234,38 +291,73 @@ def run_single_account(total, idx, user_mi, passwd_mi):
     return exec_result
 
 
+def run_accounts(user_list, passwd_list):
+    total = len(user_list)
+    if use_concurrent:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            return list(executor.map(lambda x: run_single_account(total, x[0], *x[1]),
+                                     enumerate(zip(user_list, passwd_list))))
+    exec_results = []
+    idx = 0
+    for user_mi, passwd_mi in zip(user_list, passwd_list):
+        exec_results.append(run_single_account(total, idx, user_mi, passwd_mi))
+        idx += 1
+        if idx < total:
+            # 每个账号之间间隔一定时间请求一次，避免接口请求过于频繁导致异常
+            time.sleep(sleep_seconds)
+    return exec_results
+
+
+def retry_failed(exec_results, user_list, passwd_list):
+    """对执行失败的账号自动补救，最多重试 max_retry 轮"""
+    for attempt in range(1, max_retry + 1):
+        failed = [result for result in exec_results if result.get('success') is not True]
+        if not failed:
+            break
+        print(f"[{format_now()}] 第{attempt}/{max_retry}次补救：待补救账号{len(failed)}个")
+        for index, result in enumerate(exec_results):
+            if result.get('success') is True:
+                continue
+            user_mi = result.get('user')
+            if user_mi not in user_list:
+                continue
+            pos = user_list.index(user_mi)
+            exec_results[index] = run_single_account(len(user_list), pos, user_mi, passwd_list[pos])
+            time.sleep(sleep_seconds)
+    return exec_results
+
+
 def execute():
     user_list = users.split('#')
     passwd_list = passwords.split('#')
-    exec_results = []
-    if len(user_list) == len(passwd_list):
-        idx, total = 0, len(user_list)
-        if use_concurrent:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                exec_results = executor.map(lambda x: run_single_account(total, x[0], *x[1]),
-                                            enumerate(zip(user_list, passwd_list)))
-        else:
-            for user_mi, passwd_mi in zip(user_list, passwd_list):
-                exec_results.append(run_single_account(total, idx, user_mi, passwd_mi))
-                idx += 1
-                if idx < total:
-                    # 每个账号之间间隔一定时间请求一次，避免接口请求过于频繁导致异常
-                    time.sleep(sleep_seconds)
-        if encrypt_support:
-            persist_user_tokens()
-        success_count = 0
-        push_results = []
-        for result in exec_results:
-            push_results.append(result)
-            if result['success'] is True:
-                success_count += 1
-        summary = f"\n执行账号总数{total}，成功：{success_count}，失败：{total - success_count}"
-        print(summary)
-        push_util.push_results(push_results, summary, push_config)
-    else:
+    if len(user_list) != len(passwd_list):
         print(f"账号数长度[{len(user_list)}]和密码数长度[{len(passwd_list)}]不匹配，跳过执行")
         exit(1)
+
+    state = load_step_state()
+    check_mode = time_bj.hour >= check_hour
+    if check_mode and is_today_reached(state, user_list):
+        accounts = state.get('accounts') or {}
+        reached = ", ".join(f"{desensitize_user_name(user)}={accounts[user].get('step')}" for user in user_list)
+        print(f"[{format_now()}] 检查模式：今日步数已达标（{reached}），本次不再执行")
+        save_step_state(state)
+        return
+
+    if check_mode:
+        print(f"[{format_now()}] 检查模式：今日未达标或没有执行记录，开始补救")
+
+    exec_results = retry_failed(run_accounts(user_list, passwd_list), user_list, passwd_list)
+
+    if encrypt_support:
+        persist_user_tokens()
+
+    total = len(user_list)
+    success_count = sum(1 for result in exec_results if result.get('success') is True)
+    summary = f"\n执行账号总数{total}，成功：{success_count}，失败：{total - success_count}"
+    print(summary)
+    save_step_state(state, exec_results)
+    push_util.push_results(exec_results, summary, push_config)
 
 
 def prepare_user_tokens() -> dict:
@@ -356,6 +448,8 @@ if __name__ == "__main__":
         print("未正确配置账号密码，无法执行")
         exit(1)
     min_step, max_step = get_min_max_by_time()
+    check_hour = get_int_value_default(config, 'CHECK_HOUR', 21)
+    max_retry = get_int_value_default(config, 'MAX_RETRY', 3)
     use_concurrent = config.get('USE_CONCURRENT')
     if use_concurrent is not None and use_concurrent == 'True':
         use_concurrent = True
