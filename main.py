@@ -216,7 +216,7 @@ def run_single_account(total, idx, user_mi, passwd_mi):
         log_str += f'{exec_msg}\n'
         exec_result = {"user": user_mi, "success": success,
                        "msg": exec_msg}
-    except:
+    except Exception:
         log_str += f"执行异常:{traceback.format_exc()}\n"
         log_str += traceback.format_exc()
         exec_result = {"user": user_mi, "success": False,
@@ -268,7 +268,7 @@ def prepare_user_tokens() -> dict:
             decrypted_data = decrypt_data(data, aes_key, None)
             # 假设原始明文为 UTF-8 编码文本
             return json.loads(decrypted_data.decode('utf-8', errors='strict'))
-        except:
+        except Exception:
             print("密钥不正确或者加密内容损坏 放弃token")
             return dict()
     else:
@@ -304,7 +304,7 @@ if __name__ == "__main__":
     if "CONFIG" in os.environ:
         try:
             config = dict(json.loads(os.environ.get("CONFIG")))
-        except:
+        except Exception:
             print("CONFIG格式不正确，请检查Secret配置，请严格按照JSON格式：使用双引号包裹字段和值，逗号不能多也不能少")
             traceback.print_exc()
             exit(1)
