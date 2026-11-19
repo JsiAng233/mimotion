@@ -29,6 +29,15 @@ def get_int_value_default(_config: dict, _key, default):
 
 # 获取当前时间对应的最大和最小步数
 def get_min_max_by_time(hour=None, minute=None):
+    # 目标步数模式：不按当天时间线性缩放，任意时刻触发写入的步数都落在 TARGET_STEP 附近，
+    # 这样即便 GitHub Actions 的定时任务被延迟或漏触发，当天最终步数也能稳定在目标值。
+    # 想恢复原来按时间放大的逻辑，把 TARGET_STEP 设为 0 即可（会改用 MIN_STEP / MAX_STEP）。
+    target_step = get_int_value_default(config, 'TARGET_STEP', 19000)
+    if target_step > 0:
+        fluctuation = get_int_value_default(config, 'STEP_FLUCTUATION', 300)
+        fluctuation = max(fluctuation, 0)
+        target_step = max(target_step, fluctuation)
+        return int(target_step - fluctuation), int(target_step + fluctuation)
     if hour is None:
         hour = time_bj.hour
     if minute is None:
