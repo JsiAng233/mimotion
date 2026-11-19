@@ -11,6 +11,9 @@ import requests
 
 from util.aes_help import encrypt_data, HM_AES_KEY, HM_AES_IV
 
+# 统一请求超时（连接, 读取），避免接口无响应时 Actions 任务被卡满 60 分钟
+TIMEOUT = (5, 20)
+
 
 # 通过账号密码获取access_token和refresh_token 但是refresh_token不知道怎么使用
 def login_access_token(user, password) -> (str | None, str | None):
@@ -39,7 +42,10 @@ def login_access_token(user, password) -> (str | None, str | None):
     cipher_data = encrypt_data(plaintext, HM_AES_KEY, HM_AES_IV)
 
     url1 = 'https://api-user.zepp.com/v2/registrations/tokens'
-    r1 = requests.post(url1, data=cipher_data, headers=headers, allow_redirects=False, timeout=5)
+    try:
+        r1 = requests.post(url1, data=cipher_data, headers=headers, allow_redirects=False, timeout=TIMEOUT)
+    except requests.RequestException as e:
+        return None, "登录请求异常：%s" % e
     if r1.status_code != 303:
         return None, "登录异常，status: %d" % r1.status_code
     try:
@@ -47,7 +53,7 @@ def login_access_token(user, password) -> (str | None, str | None):
         code = get_access_token(location)
         if code is None:
             return None, "获取accessToken失败 %s" % get_error_code(location)
-    except:
+    except Exception:
         return None, f"获取accessToken异常:{traceback.format_exc()}"
     return code, None
 
@@ -127,7 +133,12 @@ def grant_login_tokens(access_token, device_id, is_phone=False) -> (str | None, 
             "source": "com.xiaomi.hm.health:6.14.0:50818",
             "third_name": "email",
         }
-    resp = requests.post(url, data=data, headers=headers).json()
+    try:
+        resp = requests.post(url, data=data, headers=headers, timeout=TIMEOUT).json()
+    except requests.RequestException as e:
+        return None, None, None, "客户端登录请求异常：%s" % e
+    except ValueError:
+        return None, None, None, "客户端登录返回内容无法解析为JSON"
     # print("请求客户端登录成功：%s" % json.dumps(resp, ensure_ascii=False, indent=2))  #
     _login_token, _userid, _app_token = None, None, None
     try:
@@ -137,8 +148,9 @@ def grant_login_tokens(access_token, device_id, is_phone=False) -> (str | None, 
         _login_token = resp["token_info"]["login_token"]
         _app_token = resp["token_info"]["app_token"]
         _userid = resp["token_info"]["user_id"]
-    except:
-        print("提取login_token失败：%s" % json.dumps(resp, ensure_ascii=False, indent=2))
+    except Exception:
+        # 该响应体含 login_token/app_token，禁止整体打印，避免泄露到公开的 Actions 日志
+        print("提取login_token失败，result=%s" % str(resp.get("result")))
     return _login_token, _app_token, _userid, None
 
 
@@ -146,11 +158,12 @@ def grant_login_tokens(access_token, device_id, is_phone=False) -> (str | None, 
 def grant_app_token(login_token: str) -> (str | None, str | None):
     url = f"https://account-cn.huami.com/v1/client/app_tokens?app_name=com.xiaomi.hm.health&dn=api-user.huami.com%2Capi-mifit.huami.com%2Capp-analytics.huami.com&login_token={login_token}"
     headers = {'User-Agent': 'MiFit/5.3.0 (iPhone; iOS 14.7.1; Scale/3.00)'}
-    resp = requests.get(url, headers=headers)
+    resp = requests.get(url, headers=headers, timeout=TIMEOUT)
     if resp.status_code != 200:
         return None, "请求异常：%d" % resp.status_code
     resp = resp.json()
-    print("grant_app_token: %s" % json.dumps(resp))
+    # 注意：该响应里含 app_token，禁止打印完整内容，否则会泄露到公开的 Actions 日志
+    # print("grant_app_token: %s" % json.dumps(resp))
 
     result = resp.get("result")
     if result != "ok":
@@ -195,7 +208,7 @@ def check_app_token(app_token) -> (bool, str | None):
         "lang": "zh_CN",
         "clientid": "428135909242707968"
     }
-    response = requests.get(url, params=params, headers=headers)
+    response = requests.get(url, params=params, headers=headers, timeout=TIMEOUT)
     if response.status_code != 200:
         return False, "请求异常：%d" % response.status_code
     response = response.json()
@@ -228,7 +241,7 @@ def renew_login_token(login_token) -> (str | None, str | None):
         "appplatform": "android_phone"
     }
 
-    resp = requests.get(url, params=params, headers=headers)
+    resp = requests.get(url, params=params, headers=headers, timeout=TIMEOUT)
     if resp.status_code != 200:
         return None, "请求异常：%d" % resp.status_code
     resp = resp.json()
@@ -294,7 +307,7 @@ def post_fake_brand_data(step, app_token, userid, device_id=None):
 
     data = f'userid={userid}&last_sync_data_time=1597306380&device_type=0&last_deviceid={target_dev_id}&data_json={data_json}'
 
-    response = requests.post(url, data=data, headers=head)
+    response = requests.post(url, data=data, headers=head, timeout=TIMEOUT)
     if response.status_code != 200:
         return False, "请求修改步数异常：%d" % response.status_code
     response = response.json()
